@@ -1,5 +1,48 @@
 # Madeira Dock — implementation handoff, ml2000 (2026-09-25)
 
+## Pufflet fork — persistent session (2026-10-16)
+
+The fork adds `--serve`, bounded numeric stdin commands/stdout events, a single
+Valve callback owner, pollable launch/CEG and install jobs, queue pause/resume,
+pause-and-forget cancellation, idle shutdown and online-loss refusal.
+One-shot launch/install remain available. README.md records the protocol,
+sidecar format, kill switch and numbered errors; CLIENT_LAYOUTS.md records the
+new exact-DLL queue/validation method evidence. The sibling Madeira checkout is
+absent here; Pufflet's `docs/PERSISTENT_SESSION.md` is the integration handoff.
+
+Validation: four portable sanitizer suites and x64/i386 -Werror builds pass.
+Exact official January DLL slot/name/IPC/instruction checks pass; tree privacy
+checks and scanner self-test pass. History scanning retains 14 inherited
+path/email findings; they were not introduced or rewritten here.
+
+A signed Mac test using a new isolated prefix/library installed App ID 1625450
+through the daemon, with API/ACF state 4 and 104,901,520/104,901,520 downloaded
+bytes. The same host accepted installation of 212800 and launched the installed
+1625450 with the strict matching 524-byte success callback and running event.
+Valve suspended the queued update while the game ran; after ending only the
+test game process, the same session downloaded/committed 212800 with
+21,048,992/21,048,992 downloaded bytes and state 4. No download-policy setting
+or pause-before-Play workaround was added. Rendering/extended play was not
+verified; this is client callback/process and download evidence.
+
+Further isolated checks passed: pause/resume, graceful shutdown mid-repair and
+restart with partial files, exact-child SIGKILL producing an error and recovery
+on the next action, two install requests accepted in one session, missing-folder
+repair through Valve, five-minute idle shutdown, and the old one-shot install
+route. The missing-folder test reversibly moved only the downloaded temporary
+copy aside; Valve restored the installation. The original copy was retained as
+a backup. Swift needed canonical folder comparison on session reuse and faster
+sampling of brief verification transitions. Both were fixed without loosening
+client/entitlement/path gates. The final read-only downloading-enabled query
+also covers policy suspension without per-app bit 512; its classification has
+pure tests. UI screenshots/results are maintained by Pufflet's integration doc.
+
+Tokens were passed only through consumed one-use files; no token/cache/game
+files are distributed. Live actors targeted only the isolated prefix/library;
+no real Steam prefix/library was used as input. The inherited XCTest host's
+initial normal-library scan was separately isolated on the Swift side. No
+release/runtime artifacts or signing configuration were modified.
+
 ## Pufflet fork — Valve install spike (2026-10-16)
 
 Fork: https://github.com/talhabalaj/madeira-dock, branch `pufflet`, starting at

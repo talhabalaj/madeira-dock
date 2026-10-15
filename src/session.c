@@ -8,6 +8,7 @@
 #include "session.h"
 #include "launch.h"
 #include "install.h"
+#include "serve.h"
 #include "validation.h"
 #include "auth.h"
 #include <stdlib.h>
@@ -122,7 +123,7 @@ static int offline_session(HMODULE module, void *engine, void *client_user, cons
 }
 
 int sh_session(HMODULE module, void *engine, const struct sh_api *api,
-               const struct sh_observer *o, const struct dock_client_layout *layout, bool install)
+               const struct sh_observer *o, const struct dock_client_layout *layout, bool install, bool serve)
 {
     int result = 30;
     struct dock_auth auth = {0};
@@ -152,7 +153,7 @@ int sh_session(HMODULE module, void *engine, const struct sh_api *api,
      * (or MADEIRA_DOCK_OFFLINE_LOGON=0) simply has no offline start; the online
      * path above is unaffected. */
     const char *offline_setting = getenv("MADEIRA_DOCK_OFFLINE_LOGON");
-    bool offline_abi = !install && !(offline_setting && !strcmp(offline_setting, "0")) &&
+    bool offline_abi = !install && !serve && !(offline_setting && !strcmp(offline_setting, "0")) &&
         method_is(module, client_user, 5, layout->logon_state) &&
         method_is(module, client_user, 214, layout->can_offline) &&
         method_is(module, client_user, 215, layout->logon_offline);
@@ -345,6 +346,11 @@ int sh_session(HMODULE module, void *engine, const struct sh_api *api,
                     o->event("session-app-zero-query", ((subscribed_fn)v[181])(client_user, 0));
                     o->event("session-invalid-app-query", ((subscribed_fn)v[181])(client_user, UINT32_MAX));
                     result = listed ? 0 : 35;
+                    if (!result && serve) {
+                        dock_auth_clear(&auth, sizeof(auth));
+                        result = sh_serve(module, engine, client_user, api, o, pipe, user, id, layout);
+                        break;
+                    }
                     if (!result && install) {
                         result = sh_install(module, engine, api, o, pipe, user, (uint32_t)app, layout);
                         break;
@@ -398,9 +404,9 @@ done:
 }
 #else
 int sh_session(HMODULE module, void *engine, const struct sh_api *api,
-               const struct sh_observer *o, const struct dock_client_layout *layout, bool install)
+               const struct sh_observer *o, const struct dock_client_layout *layout, bool install, bool serve)
 {
-    (void)module; (void)engine; (void)api; (void)layout; (void)install;
+    (void)module; (void)engine; (void)api; (void)layout; (void)install; (void)serve;
     o->event("session-requires-64-bit-host", 1);
     return 30;
 }

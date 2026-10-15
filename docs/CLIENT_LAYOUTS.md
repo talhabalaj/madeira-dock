@@ -174,3 +174,44 @@ The new ABI typedefs are independently written C, not copied declarations.
 Immediate-download semantics were initially reference-led; the official client
 independently confirms the wrapper names, sizes, argument registers and the
 corrected aggregate work-counter offsets. Runtime evidence belongs in HANDOFF.md.
+
+
+## Pufflet persistent session — queue control and verification
+
+January only, under the same complete DLL SHA-256 gate. Added zero-based
+IClientAppManagerMap slot 56 `ChangeAppDownloadQueuePlacement`, RVA `0x721b60`,
+IPC function `0x9bd943a2`, fencepost `0x9e21ce58`. Independently inspected wrapper:
+rcx=this, edx=u32 AppID, r8d=i32 placement; serializes 4/4 bytes and reads a
+one-byte bool. CUserAppManager slot 56 (`0x4a9410`) forwards to `0x4b56d0`.
+That implementation compares placement to 6 (paused) and 5 (last/resume);
+`0x4b5d16` selects app-state bit `0x200` for placement 6 and removes the queue
+record, without uninstall/deletion. Placement 5 appends it to the queue.
+The older [OpenSteamworks enum](https://github.com/fire64/opensteamworks/blob/master/EAppDownloadQueuePlacement.h)
+was a naming reference; the called wrapper and branches above are independent
+exact-client evidence. Cancel uses pause-and-forget in Dock, never uninstall.
+
+Slot 27 `StartValidatingApp`, RVA `0x855290`, IPC function `0x507803eb`,
+fencepost `0x52a57c33`: rcx=this, edx=u32 AppID, serializes 4 bytes and returns
+one-byte bool. CUserAppManager slot 27 (`0x4b76d0`) requires installed state,
+sets validation request bytes at `0x4b781f`, marks dependent app requests, then
+queues placement 1 at `0x4b78f1`. It asks Valve's client to verify/restore its
+content; Dock neither hashes nor edits game files. A successful bool is only
+request acceptance. The poller must observe work leave state 4 before trusting
+API+ACF completion. Fast state transitions are sampled from the main pump,
+separately from the one-second UI progress cadence.
+
+`tools/check-client-layout.py` checks both added slots/RVAs, own-method names,
+IPC IDs, a queue-method UninstallApp negative control, and the exact paused-bit
+selection instructions. The September table has zero addresses and refuses
+these calls. Live behavior and limitations belong in HANDOFF.md.
+
+
+The persistent adapter also checks slot 40 `BIsDownloadingEnabled`, January RVA
+`0x715520`, IPC function `0x2936b610`, fencepost `0x2b789bab`. The wrapper takes
+only `this` and reads one bool. CUserAppManager's method at `0x4a6080` consults
+its current download mode and gates; it is queried read-only, never changed by
+Dock. A running game's policy can suspend queued updates without setting the
+per-app paused bit. The UI therefore reports a pause while playing only when
+a game is running, the user did not pause that job, and either the client's
+download-enabled answer is false or its explicit paused bit is set. Static
+slot/name/IPC checks and pure classification assertions cover this path.

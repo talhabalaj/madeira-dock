@@ -7,6 +7,29 @@
 #include <stdio.h>
 int main(void)
 {
+    assert(sh_downloads_paused_while_playing(true, false, false, 10));
+    assert(sh_downloads_paused_while_playing(true, false, true, 512));
+    assert(!sh_downloads_paused_while_playing(false, false, false, 10));
+    assert(!sh_downloads_paused_while_playing(true, true, false, 512));
+    assert(!sh_downloads_paused_while_playing(true, false, true, 10));
+    struct sh_command command = {0};
+    assert(sh_parse_command("1 install 480", &command));
+    assert(command.request == 1 && command.app == 480 && command.kind == SH_CMD_INSTALL);
+    assert(sh_parse_command("2147483647 launch 480 9\r", &command));
+    assert(command.option == 9);
+    assert(sh_parse_command("2 status", &command));
+    assert(sh_parse_command("3 shutdown", &command));
+    const char *invalid[] = {"", "0 status", "-1 status", "1 unknown", "1 status 2",
+        "1 launch 480", "1 install 0", "1 install 2147483648", "1 launch 1 -1",
+        "1  install 1", "1 install 1 ", "1 install 1\n", "1 install C:\\secret", "1 status x x x x"};
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+        assert(!sh_parse_command(invalid[i], &command));
+    assert(sh_session_idle(300000, 0, 300000, false, false));
+    assert(!sh_session_idle(300000, 0, 300000, true, false));
+    assert(!sh_session_idle(300000, 0, 300000, false, true));
+    assert(!sh_session_idle(299999, 0, 300000, false, false));
+    assert(!sh_session_idle(10, 20, 1, false, false));
+
     uint32_t state = 0;
     const char acf[] = "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"4\" \"Nested\" { \"StateFlags\" \"2\" } }";
     assert(sh_install_manifest_ready(acf, strlen(acf), 17, &state) && state == 4);

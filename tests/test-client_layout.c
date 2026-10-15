@@ -26,6 +26,11 @@ int main(void)
     assert(jan->ceg_request == 0x82a8c0 && sep->ceg_request == 0x84e8b0);
     assert(jan->install_app == 0x812430 && jan->update_info == 0x777870);
     assert(jan->install_state == 0x73bae0 && jan->library_path == 0x75e300 && jan->add_library == 0x706df0);
+    assert(jan->queue_placement == 0x721b60 && jan->validate_app == 0x855290 && jan->downloading_enabled == 0x715520);
+    assert(!sep->queue_placement && !sep->validate_app && !sep->downloading_enabled);
+    vtable[56] = (void *)(base + jan->queue_placement);
+    assert(dock_method_is(base, &object, 56, jan->queue_placement));
+    assert(!dock_method_is(base, &object, 55, jan->queue_placement));
     assert(!sep->install_app && !sep->update_info && !sep->add_library);
     vtable[0] = (void *)(base + jan->install_app);
     assert(dock_method_is(base, &object, 0, jan->install_app));

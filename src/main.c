@@ -205,6 +205,7 @@ int main(int argc, char **argv)
     HANDLE mutex = NULL, file = INVALID_HANDLE_VALUE;
     void *public_client = NULL;
     int result = 20;
+    bool serve = argc == 2 && !strcmp(argv[1], "--serve");
     bool install = argc == 3 && !strcmp(argv[1], "--install");
 
     /* ml2014: Madeira's one-time-install batch runs this before a game's
@@ -236,7 +237,14 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (argc != 1) {
+    if (serve) {
+        const char *setting = getenv("MADEIRA_DOCK_SERVE");
+        if ((setting && !strcmp(setting, "0")) ||
+            !enabled(L"MADEIRA_STEAM_HOST_SESSION") || !enabled(L"MADEIRA_STEAM_HOST_LOGIN") ||
+            enabled(L"MADEIRA_STEAM_HOST_LAUNCH") || enabled(L"MADEIRA_DOCK_OFFLINE")) return 2;
+        if (!GetEnvironmentVariableW(L"MADEIRA_DOCK_AUTH_FILE", path, PATH_CAP)) return 37;
+    }
+    if (argc != 1 && !serve) {
         uint32_t app = 0;
         const char *setting = getenv("MADEIRA_DOCK_INSTALL");
         const char *previous = getenv("MADEIRA_STEAM_HOST_APPID");
@@ -332,7 +340,7 @@ int main(int argc, char **argv)
     if (!engine) goto done;
 
     if (enabled(L"MADEIRA_STEAM_HOST_SESSION")) {
-        result = sh_session(module, engine, &api, &host_observer, client_layout, install);
+        result = sh_session(module, engine, &api, &host_observer, client_layout, install, serve);
     } else if (enabled(L"MADEIRA_STEAM_HOST_BOOTSTRAP")) {
         result = sh_probe_bootstrap(&api, &host_observer);
     } else {

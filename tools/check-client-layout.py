@@ -17,7 +17,7 @@ source = (Path(__file__).resolve().parents[1] / 'src/client_layout.c').read_text
 block = re.search(r'"' + fingerprint + r'",\s*(\d+),([^}]+)', source)
 assert block, 'Unknown SHA-256; never infer a layout from similar metadata'
 rvas = [int(x, 16) for x in re.findall(r'0x[0-9a-f]+', block[2])]
-assert len(rvas) in (18, 23)
+assert len(rvas) in (18, 26)
 pe = struct.unpack_from('<I', raw, 0x3c)[0]
 assert raw[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', raw, pe+4)[0] == 0x8664
 sections = struct.unpack_from('<H', raw, pe+6)[0]
@@ -83,7 +83,7 @@ for rva, name, function_id in ((rvas[15], 'GetLogonState', 0xb3679023),
     assert names_method(rva, name, function_id), f'{name} is not at its pinned slot'
 print('PASS: IClientUserMap slots 5/214/215 name GetLogonState, CanLogonOffline, LogOnOffline')
 
-if len(rvas) == 23:
+if len(rvas) == 26:
     table = vtable('IClientAppManagerMap')
     for slot, rva, name, function_id in zip(
             (0, 4, 20, 76, 77), rvas[18:23],
@@ -97,3 +97,17 @@ if len(rvas) == 23:
     assert image[0x5ad3a4:0x5ad3a8] == bytes.fromhex('48 01 42 44')
     assert image[0x5ad3ad:0x5ad3b1] == bytes.fromhex('48 01 42 3c')
     print('PASS: January install/progress/library slots, names and IPC IDs; negative control')
+
+    actual = struct.unpack_from('<Q', image, table + 8 * 56)[0] - base
+    assert actual == rvas[23] and names_method(actual, 'ChangeAppDownloadQueuePlacement', 0x9bd943a2)
+    assert not names_method(actual, 'UninstallApp', 0x9bd943a2)
+    assert image[0x4b5d16:0x4b5d24] == bytes.fromhex('83 fe 06 41 8b d7 b8 00 02 00 00 0f 44 d0')
+    print('PASS: January queue placement slot/name/IPC, pause state bit, uninstall negative control')
+
+    actual = struct.unpack_from('<Q', image, table + 8 * 27)[0] - base
+    assert actual == rvas[24] and names_method(actual, 'StartValidatingApp', 0x507803eb)
+    print('PASS: January validation slot/name/IPC')
+
+    actual = struct.unpack_from('<Q', image, table + 8 * 40)[0] - base
+    assert actual == rvas[25] and names_method(actual, 'BIsDownloadingEnabled', 0x2936b610)
+    print('PASS: January downloading-enabled query slot/name/IPC')

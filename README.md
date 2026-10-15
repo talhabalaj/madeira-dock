@@ -5,7 +5,7 @@ Madeira Dock is a small headless host for **Valve's own Steam client**. It lets
 start a game the signed-in user owns, with Steam's real sign-in, Steam's real licence check and the
 game's original DRM, without running Steam's desktop interface.
 
-This fork adds an experimental opt-in install mode to the upstream launch host.
+This fork adds experimental installation and persistent-session modes to the upstream launch host.
 Corresponding source: https://github.com/talhabalaj/madeira-dock/tree/pufflet.
 
 **Licence:** GPL-3.0-or-later with the Madeira Converter Exception, Copyright 2026 125hz
@@ -249,9 +249,66 @@ No progress/state change for two minutes, a six-hour total bound, loss of the
 online session, or malformed progress ends the run with a numbered error.
 
 This is an undocumented ABI spike: keep one online account session and Wine
-running throughout the download. There is no pause/resume UI or cancellation
-protocol yet. Use an isolated test prefix/library until runtime evidence in
+running throughout the download. The one-shot mode has no command channel; use `--serve` for pause/resume and concurrent launch. Use an isolated test prefix/library until runtime evidence in
 `docs/HANDOFF.md` supports broader use. See `docs/CLIENT_LAYOUTS.md` for the ABI.
+
+### Persistent mode (Pufflet fork)
+
+`dockhost.exe --serve` requires the same probe/session/login flags, an online
+one-use native handoff and initial App ID, plus `MADEIRA_DOCK_INSTALL_LIBRARY`.
+Do not set the one-shot launch flag. `MADEIRA_DOCK_SERVE=0` refuses startup.
+Only the exact January adapter supports these operations. Desktop Steam and
+another host remain conflicts. The initial App ID is checked during sign-in;
+every later operation checks the client's subscription list again.
+
+The host reads bounded ASCII stdin lines: `<request> install <appid>`,
+`pause`, `resume`, `cancel` with the same arguments, `<request> launch <appid>
+<option>`, `<request> status`, and `<request> shutdown`. Request IDs must be
+positive, strictly increasing signed-32-bit decimal numbers. App IDs are
+positive and options nonnegative in the same range. There are at most 64
+pending commands and 64 installation records. Unknown/oversized/malformed
+input is refused without echoing it. EOF requests shutdown.
+
+Stdout carries `[steam-host] pufflet2 request-id=N app-id=N key=value` lines.
+Session events use zero IDs; command-result 0 means accepted, not finished.
+Per-app install fields retain the one-shot units and manifest/API completion
+checks, followed by `install-result`. Launch fields end with
+`launch-host-result`. `session-ready=1` permits commands; `session-result`
+ends the pump. All values are numbers, with no account data or paths. Stdout
+must be continuously drained by the parent. The fixed startup/teardown report
+still goes to the existing numeric diagnostic log; streaming progress does not
+append indefinitely to that file.
+
+A stdin reader thread only parses into a bounded mailbox. One main thread
+makes all client calls, dispatches callbacks before freeing them, and polls
+launch/CEG/retry/running and all installs without nested wait loops. Valve owns
+installation order, shared dependencies and download-while-playing policy.
+Queued/paused jobs have no two-minute stall timer. `pause` selects Valve queue
+placement 6; `resume` selects 5. `cancel` pauses and removes the host's tracking
+record, preserving partial content for a later install request; it never calls
+UninstallApp. `install-paused-playing=1` means the client reports paused state
+512 or BIsDownloadingEnabled=false while a game runs and the user did not explicitly pause that record.
+
+Reinstalling an app whose API state is already 4 asks the verified
+StartValidatingApp method to check/restore files, including deleted files.
+Verification must show an active state transition before completion is reported;
+request acceptance and an unchanged old state-4 manifest alone are insufficient.
+An unobserved validation transition fails with 69 after two minutes.
+
+For launch, the parent atomically writes `<request>.launch` below the private
+`MADEIRA_DOCK_REQUEST_DIR`. Format: `MDOCKL01`, App ID, original launch-option
+key, CEG flag (0/1), expected absolute UTF-8 Windows install folder, each on
+its own LF-terminated line. The host exclusively consumes/deletes the bounded
+file, rejects reparse points and matches its numeric IDs. It retains the
+original expected-folder, CEG, discovery and strict LaunchApp callback checks.
+Paths never appear in commands/events. The sidecar cannot authorize ownership.
+
+Services are prepared before entering the pump; a service failure refuses CEG
+launches. After five minutes with no tracked install or launch, the host exits
+normally. Paused installs keep the session alive. Status does not reset idle
+time. Loss of online authentication for a full second ends the session with
+64. A crash leaves partial content to Valve and requires parent-owned,
+prefix-scoped teardown before another logon. One-shot modes are unchanged.
 
 ### Result codes
 
@@ -284,6 +341,10 @@ protocol yet. Use an isolated test prefix/library until runtime evidence in
 | 63 | Install stalled for two minutes or exceeded six hours. |
 | 64 | Online session lost during install. |
 | 65 | Invalid GetUpdateInfo progress. |
+| 66 | Invalid control command or command channel. |
+| 67 | Operation already active or tracking capacity reached. |
+| 68 | Valve refused a queue placement change or the job is not tracked. |
+| 69 | Valve verification could not be started or its state transition was not observed. |
 
 The report (`[steam-host] <round> <stage>=<number>` lines) is documented field by field in
 Madeira's `docs/MADEIRA_DOCK.md`.

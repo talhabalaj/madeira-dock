@@ -20,6 +20,7 @@ struct dock_client_layout {
     uintptr_t logon_state, can_offline, logon_offline;
     /* Pufflet install spike: January adapter only. Zero fails closed. */
     uintptr_t install_app, install_state, update_info, library_path, add_library;
+    uintptr_t queue_placement, validate_app, downloading_enabled;
 };
 const struct dock_client_layout *dock_client_layout(const char *sha256);
 bool dock_method_is(uintptr_t module, void *object, unsigned slot, uintptr_t rva);

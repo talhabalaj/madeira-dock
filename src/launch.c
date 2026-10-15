@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>
+#include <stdlib.h>
 
 /* ml1970: an interrupted or stalled client update eventually fails closed. */
 #define SH_CONTENT_WAIT_MS (6ULL * 60 * 60 * 1000)
@@ -404,6 +405,178 @@ done:
     o->event("launch-host-result", result);
     return result;
 }
+/* Pollable launch used by --serve. The caller alone owns callback pumping. */
+struct sh_launch_job {
+    void *engine, *client_user, *manager;
+    HKEY active, machine;
+    struct saved_value values[3];
+    const struct sh_observer *o;
+    const struct dock_client_layout *layout;
+    int32_t pipe;
+    uint64_t gameid, steamid, call, began, stopped_at, retry_at;
+    uint64_t content_began, config_began, session_began, ceg_began;
+    uint32_t option;
+    unsigned retries;
+    int stage, result;
+    bool seen_running, accepted, rejected, ceg_waiting;
+    struct sh_ceg_progress ceg;
+};
+
+int sh_launch_close(struct sh_launch_job *job)
+{
+    if (!job) return 0;
+    bool restored = true;
+    if (job->values[0].changed) {
+        DWORD current = 0, bytes = sizeof(current), type = 0;
+        if (RegQueryValueExW(job->active, L"pid", NULL, &type, (BYTE *)&current, &bytes) != ERROR_SUCCESS ||
+            type != REG_DWORD || current != GetCurrentProcessId()) restored = false;
+    }
+    if (restored)
+        for (int i = 2; i >= 0; --i) if (!restore(&job->values[i])) restored = false;
+    if (job->machine) RegCloseKey(job->machine);
+    if (job->active) RegCloseKey(job->active);
+    job->o->event("launch-discovery-restored", restored);
+    free(job);
+    return restored ? 0 : 47;
+}
+
+int sh_launch_begin(HMODULE module, void *engine, void *client_user,
+                    const struct sh_observer *o, int32_t pipe, int32_t user,
+                    uint64_t steamid, uint32_t appid, uint32_t option,
+                    const wchar_t *expected, bool ceg,
+                    const struct dock_client_layout *layout, struct sh_launch_job **out)
+{
+    if (!layout || !method_is(module, engine, 43, layout->engine_manager) ||
+        !method_is(module, engine, 33, layout->engine_result) ||
+        !method_is(module, client_user, 67, layout->running)) return 40;
+    void *manager = ((get_manager_fn)(*(void ***)engine)[43])(engine, user, pipe);
+    if (!method_is(module, manager, 2, layout->launch) ||
+        !method_is(module, manager, 5, layout->install_dir)) return 40;
+    char actual_utf8[32768] = {0};
+    wchar_t actual[32768], normalized[32768];
+    int32_t got = ((install_dir_fn)(*(void ***)manager)[5])(manager, appid, actual_utf8, sizeof(actual_utf8));
+    if (got <= 0 || got >= (int32_t)sizeof(actual_utf8) || !memchr(actual_utf8, 0, sizeof(actual_utf8)) ||
+        !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, actual_utf8, -1, actual, 32768)) return 41;
+    DWORD length = GetFullPathNameW(actual, 32768, normalized, NULL);
+    if (!length || length >= 32768 || _wcsicmp(normalized, expected)) return 41;
+    o->event("launch-install-directory-verified", 1);
+    if (ceg && (wide_flag(L"MADEIRA_DOCK_CEG", L'0') ||
+        !method_is(module, client_user, 71, layout->ceg_request))) return 49;
+    struct sh_launch_job *job = calloc(1, sizeof(*job));
+    if (!job) return 40;
+    *job = (struct sh_launch_job){.engine=engine, .client_user=client_user, .manager=manager,
+        .o=o, .layout=layout, .pipe=pipe, .gameid=appid, .steamid=steamid, .option=option,
+        .stage=ceg ? 1 : 2, .result=-1, .ceg_began=o->now_ms()};
+    o->event("launch-option-index", (int32_t)option);
+    *out = job;
+    return 0;
+}
+
+void sh_launch_callback(struct sh_launch_job *j, const struct sh_callback *cb)
+{
+    const struct sh_observer *o = j->o;
+    uint64_t now = o->now_ms();
+    if (j->stage == 1 && cb->id == SH_CEG_JOB_FINISHED) {
+        int32_t result = 0;
+        if (j->ceg_waiting && sh_decode_ceg_job(cb->data, (size_t)cb->size, (uint32_t)j->gameid, &result)) {
+            enum sh_ceg_step step = sh_ceg_record_job(&j->ceg, result);
+            if (step == SH_CEG_DONE) { j->stage = 2; o->event("ceg-result", 1); }
+            if (step == SH_CEG_FAIL) { j->result = 49; o->event("ceg-result", result); }
+        }
+    }
+    if (j->stage != 3 || cb->id != 703 || cb->size < 16) return;
+    uint64_t finished; int32_t kind; uint32_t size;
+    memcpy(&finished, cb->data, 8); memcpy(&kind, (char *)cb->data + 8, 4);
+    memcpy(&size, (char *)cb->data + 12, 4);
+    if (finished != j->call) return;
+    unsigned char payload[524] = {0}; bool failed = false;
+    bool read = kind == 1270027 && size == sizeof(payload) &&
+        ((call_result_fn)(*(void ***)j->engine)[33])(j->engine, j->pipe, j->call, payload, sizeof(payload), kind, &failed);
+    int32_t error = -1;
+    bool decoded = read && !failed && sh_decode_launch_result(payload, size, j->gameid, &error);
+    bool missing = decoded && error == 22 && sh_launch_option_missing(payload, size, j->option);
+    o->event("launch-client-error", error);
+    if (missing) o->event("launch-option-missing", (int32_t)j->option);
+    j->accepted = decoded && !error; j->rejected = !j->accepted;
+    if (!j->accepted && decoded && !j->seen_running) {
+        if (sh_launch_error_waits_for_content(error) && !wide_flag(L"MADEIRA_DOCK_CONTENT_WAIT", L'0') &&
+            (!j->content_began || now - j->content_began < SH_CONTENT_WAIT_MS)) {
+            if (!j->content_began) j->content_began = now;
+            j->retry_at = now + sh_launch_retry_delay_ms(j->retries);
+            o->event("launch-update-wait", error);
+        } else if (!missing && sh_launch_error_waits_for_config(error) && !wide_flag(L"MADEIRA_DOCK_CONFIG_WAIT", L'0') &&
+            (!j->config_began || now - j->config_began < SH_CONFIG_WAIT_MS)) {
+            if (!j->config_began) j->config_began = now;
+            j->retry_at = now + SH_CONFIG_RETRY_MS;
+            o->event("launch-config-wait", error);
+        } else if (sh_launch_error_waits_for_session(error) && !wide_flag(L"MADEIRA_DOCK_SESSION_WAIT", L'0') &&
+            (!j->session_began || now - j->session_began < SH_SESSION_WAIT_MS)) {
+            if (!j->session_began) j->session_began = now;
+            j->retry_at = now + SH_SESSION_RETRY_MS;
+            o->event("launch-session-wait", error);
+        }
+        if (j->retry_at) j->rejected = false;
+    }
+}
+
+bool sh_launch_running(const struct sh_launch_job *j) { return j && j->seen_running && !j->stopped_at; }
+
+int sh_launch_poll(struct sh_launch_job *j)
+{
+    if (j->result != -1) return j->result;
+    uint64_t now = j->o->now_ms();
+    if (j->stage == 1) {
+        if (now - j->ceg_began >= SH_CEG_WAIT_MS) return 49;
+        if (!j->ceg_waiting && now >= j->retry_at) {
+            uint32_t jobs = UINT32_MAX;
+            int32_t result = ((ceg_request_fn)(*(void ***)j->client_user)[71])(
+                j->client_user, (uint32_t)j->gameid, false, false, &jobs);
+            enum sh_ceg_step step = sh_ceg_request_step(result, jobs, &j->ceg);
+            j->o->event("ceg-request", jobs == UINT32_MAX ? -1 : (int32_t)jobs);
+            if (step == SH_CEG_RETRY) j->retry_at = now + SH_CEG_BUSY_RETRY_MS;
+            else if (step == SH_CEG_WAIT) j->ceg_waiting = true;
+            else return 49;
+        }
+        return -1;
+    }
+    if (j->stage == 2) {
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", 0,
+                KEY_QUERY_VALUE | KEY_SET_VALUE, &j->active) != ERROR_SUCCESS ||
+            RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Valve\\Steam", 0,
+                KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_32KEY, &j->machine) != ERROR_SUCCESS) return 42;
+        j->values[0] = (struct saved_value){.key=j->active, .name=L"pid"};
+        j->values[1] = (struct saved_value){.key=j->active, .name=L"ActiveUser"};
+        j->values[2] = (struct saved_value){.key=j->machine, .name=L"SteamPID"};
+        if (!publish(&j->values[0], GetCurrentProcessId()) || !publish(&j->values[1], (DWORD)j->steamid) ||
+            !publish(&j->values[2], GetCurrentProcessId())) return 42;
+        j->retry_at = now; j->stage = 3;
+    }
+    bool running = ((running_fn)(*(void ***)j->client_user)[67])(j->client_user, &j->gameid);
+    if (running && !j->seen_running) {
+        j->o->event("launch-game-running", 1); j->seen_running = true; j->retry_at = 0;
+    }
+    if (running) j->stopped_at = 0;
+    else if (j->seen_running) {
+        if (!j->stopped_at) j->stopped_at = now;
+        if (now - j->stopped_at >= 3000) {
+            j->o->event("launch-game-ended", 1);
+            return j->accepted && !j->rejected ? 0 : 46;
+        }
+    }
+    if (j->retry_at && !j->seen_running && now >= j->retry_at) {
+        j->retry_at = 0;
+        j->call = ((launch_fn)(*(void ***)j->manager)[2])(j->manager, &j->gameid, j->option, 0, "");
+        j->o->event("launch-request-submitted", j->call != 0);
+        ++j->retries; j->began = now;
+        if (!j->call) return 43;
+    }
+    if (!j->seen_running && !j->retry_at) {
+        if (j->rejected && now - j->began > 5000) return j->content_began ? 48 : 45;
+        if (now - j->began > 90000) return 44;
+    }
+    return -1;
+}
+
 #else
 int sh_launch(HMODULE module, void *engine, void *client_user,
               const struct sh_api *api, const struct sh_observer *o,

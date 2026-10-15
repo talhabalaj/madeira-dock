@@ -85,4 +85,12 @@ bool sh_install_manifest_ready(const char *text, size_t size, uint32_t appid, ui
 struct sh_install_progress { uint32_t state; uint64_t total, completed; };
 bool sh_install_decode_progress(const void *data, size_t size, struct sh_install_progress *out);
 int32_t sh_install_kib(uint64_t bytes);
+bool sh_downloads_paused_while_playing(bool playing, bool user_paused, bool enabled, uint32_t state);
+/* Persistent control protocol. No paths or account strings are accepted. */
+enum sh_command_kind { SH_CMD_INSTALL = 1, SH_CMD_PAUSE, SH_CMD_RESUME,
+    SH_CMD_CANCEL, SH_CMD_LAUNCH, SH_CMD_STATUS, SH_CMD_SHUTDOWN };
+struct sh_command { uint32_t request, app, option; enum sh_command_kind kind; };
+bool sh_parse_command(const char *line, struct sh_command *out);
+bool sh_session_idle(uint64_t now, uint64_t idle_since, uint64_t bound,
+                     bool downloading, bool launching);
 #endif

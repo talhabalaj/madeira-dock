@@ -307,3 +307,50 @@ int32_t sh_install_kib(uint64_t bytes)
     uint64_t kib = bytes / 1024;
     return kib > INT32_MAX ? INT32_MAX : (int32_t)kib;
 }
+
+
+bool sh_parse_command(const char *line, struct sh_command *out)
+{
+    if (!line || !out || !*line || strlen(line) > 95) return false;
+    char copy[96];
+    strcpy(copy, line);
+    size_t size = strlen(copy);
+    if (size && copy[size - 1] == '\r') copy[--size] = 0;
+    char *parts[5] = {0};
+    unsigned count = 0;
+    char *start = copy;
+    for (char *p = copy;; ++p) {
+        if (*p == ' ' || !*p) {
+            bool end = !*p;
+            if (p == start || count == 5) return false;
+            parts[count++] = start;
+            *p = 0;
+            if (end) break;
+            start = p + 1;
+        } else if ((unsigned char)*p < 33 || (unsigned char)*p > 126) return false;
+    }
+    if (count < 2) return false;
+    struct sh_command cmd = {0};
+    if (!sh_parse_launch_option(parts[0], &cmd.request) || !cmd.request) return false;
+    const char *names[] = {"install", "pause", "resume", "cancel", "launch", "status", "shutdown"};
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        if (!strcmp(parts[1], names[i])) cmd.kind = (enum sh_command_kind)(i + 1);
+    if (!cmd.kind) return false;
+    unsigned expected = cmd.kind >= SH_CMD_STATUS ? 2 : cmd.kind == SH_CMD_LAUNCH ? 4 : 3;
+    if (count != expected) return false;
+    if (expected >= 3 && (!sh_parse_launch_option(parts[2], &cmd.app) || !cmd.app)) return false;
+    if (expected == 4 && !sh_parse_launch_option(parts[3], &cmd.option)) return false;
+    *out = cmd;
+    return true;
+}
+
+bool sh_session_idle(uint64_t now, uint64_t idle_since, uint64_t bound,
+                     bool downloading, bool launching)
+{
+    return !downloading && !launching && now >= idle_since && now - idle_since >= bound;
+}
+
+bool sh_downloads_paused_while_playing(bool playing, bool user_paused, bool enabled, uint32_t state)
+{
+    return playing && !user_paused && (!enabled || (state & 512));
+}
