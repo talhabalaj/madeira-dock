@@ -227,3 +227,83 @@ const char *sh_install_scm_word(int32_t outcome)
     default: return "failed";
     }
 }
+
+/* ACF is Valve's output, but a partial/ambiguous file must never end a download.
+ * Read quoted tokens and braces; only AppState's direct numeric fields count. */
+static int acf_token(const char **cursor, const char *end, const char **word, size_t *length)
+{
+    const char *p = *cursor;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+    if (p == end) { *cursor = p; return 0; }
+    if (*p == '{' || *p == '}') { *cursor = p + 1; return *p == '{' ? 2 : 3; }
+    if (*p++ != '"') return -1;
+    *word = p;
+    while (p < end && *p != '"') {
+        if ((unsigned char)*p < 32) return -1;
+        if (*p == '\\' && ++p == end) return -1;
+        ++p;
+    }
+    if (p == end) return -1;
+    *length = (size_t)(p - *word); *cursor = p + 1;
+    return 1;
+}
+
+static bool acf_number(const char *word, size_t size, uint32_t *number)
+{
+    uint32_t value = 0;
+    if (!size || size > 10) return false;
+    for (size_t i = 0; i < size; ++i) {
+        if (word[i] < '0' || word[i] > '9') return false;
+        unsigned digit = (unsigned)(word[i] - '0');
+        if (value > (UINT32_MAX - digit) / 10) return false;
+        value = value * 10 + digit;
+    }
+    *number = value;
+    return true;
+}
+
+bool sh_install_manifest_ready(const char *text, size_t size, uint32_t appid, uint32_t *state)
+{
+    if (!text || !state || !appid || size > 1024 * 1024) return false;
+    const char *p = text, *end = text + size, *word = NULL;
+    size_t length = 0;
+    if (acf_token(&p, end, &word, &length) != 1 || length != 8 || memcmp(word, "AppState", 8) ||
+        acf_token(&p, end, &word, &length) != 2) return false;
+    unsigned depth = 1;
+    bool have_app = false, have_state = false;
+    uint32_t actual = 0, flags = 0;
+    while (depth) {
+        int key = acf_token(&p, end, &word, &length);
+        if (key == 3) { --depth; continue; }
+        if (key != 1) return false;
+        bool is_app = depth == 1 && length == 5 && !memcmp(word, "appid", 5);
+        bool is_state = depth == 1 && length == 10 && !memcmp(word, "StateFlags", 10);
+        int value = acf_token(&p, end, &word, &length);
+        if (value == 2) {
+            if (is_app || is_state || ++depth > 32) return false;
+        } else if (value == 1) {
+            if (is_app && (have_app || !acf_number(word, length, &actual))) return false;
+            if (is_state && (have_state || !acf_number(word, length, &flags))) return false;
+            have_app |= is_app; have_state |= is_state;
+        } else return false;
+    }
+    if (acf_token(&p, end, &word, &length) != 0 || !have_app || !have_state || actual != appid)
+        return false;
+    *state = flags;
+    return flags == 4; /* No pending update, missing/corrupt files or active install. */
+}
+
+bool sh_install_decode_progress(const void *data, size_t size, struct sh_install_progress *out)
+{
+    if (!data || !out || size != 244) return false;
+    memcpy(&out->state, (const char *)data + 4, 4);
+    memcpy(&out->total, (const char *)data + 60, 8);
+    memcpy(&out->completed, (const char *)data + 68, 8);
+    return out->completed <= out->total;
+}
+
+int32_t sh_install_kib(uint64_t bytes)
+{
+    uint64_t kib = bytes / 1024;
+    return kib > INT32_MAX ? INT32_MAX : (int32_t)kib;
+}

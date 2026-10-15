@@ -27,6 +27,7 @@ static const struct dock_client_layout *client_layout;
 static void event(const char *stage, int32_t value)
 {
     const char *round = !strncmp(stage, "install-scm", 11) ? "ml2014" :
+        !strncmp(stage, "install-", 8) ? "pufflet1" :
         !strncmp(stage, "ceg-scm", 7) || !strncmp(stage, "ceg-service-", 12) ? "ml2000" :
         !strncmp(stage, "ceg-", 4) ? "ml1990" :
         !strncmp(stage, "launch-update-", 14) ? "ml1970" :
@@ -204,6 +205,7 @@ int main(int argc, char **argv)
     HANDLE mutex = NULL, file = INVALID_HANDLE_VALUE;
     void *public_client = NULL;
     int result = 20;
+    bool install = argc == 3 && !strcmp(argv[1], "--install");
 
     /* ml2014: Madeira's one-time-install batch runs this before a game's
      * installers. No Steam client is loaded; the one stdout line ("services
@@ -232,6 +234,30 @@ int main(int argc, char **argv)
         printf("services %s\n", sh_install_scm_word(install_scm_outcome));
         fflush(stdout);
         return 0;
+    }
+
+    if (argc != 1) {
+        uint32_t app = 0;
+        const char *setting = getenv("MADEIRA_DOCK_INSTALL");
+        const char *previous = getenv("MADEIRA_STEAM_HOST_APPID");
+        uint32_t previous_app = 0;
+        if (!install || !sh_parse_launch_option(argv[2], &app) || !app ||
+            (previous && (!sh_parse_launch_option(previous, &previous_app) || previous_app != app))) {
+            event("install-invalid-arguments", 1);
+            return 60;
+        }
+        if ((setting && !strcmp(setting, "0")) ||
+            !enabled(L"MADEIRA_STEAM_HOST_SESSION") || !enabled(L"MADEIRA_STEAM_HOST_LOGIN") ||
+            enabled(L"MADEIRA_STEAM_HOST_LAUNCH") || enabled(L"MADEIRA_DOCK_OFFLINE")) {
+            event("install-disabled", 1);
+            return 2;
+        }
+        /* The CLI AppID still has to match the one-use transfer in session.c. */
+        if (!SetEnvironmentVariableA("MADEIRA_STEAM_HOST_APPID", argv[2]) ||
+            !GetEnvironmentVariableW(L"MADEIRA_DOCK_AUTH_FILE", path, PATH_CAP)) {
+            event("install-auth-file-required", 1);
+            return 37;
+        }
     }
 
     if (!enabled(L"MADEIRA_STEAM_HOST_PROBE")) {
@@ -306,7 +332,7 @@ int main(int argc, char **argv)
     if (!engine) goto done;
 
     if (enabled(L"MADEIRA_STEAM_HOST_SESSION")) {
-        result = sh_session(module, engine, &api, &host_observer, client_layout);
+        result = sh_session(module, engine, &api, &host_observer, client_layout, install);
     } else if (enabled(L"MADEIRA_STEAM_HOST_BOOTSTRAP")) {
         result = sh_probe_bootstrap(&api, &host_observer);
     } else {

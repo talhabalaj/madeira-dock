@@ -125,3 +125,52 @@ signed-negative cleanup test: slots 5 and 214 take only `this` and read back a
 and reads back a 4-byte result. Neighbouring slots 216
 `ValidateOfflineLogonTicket` and 217 `BGetOfflineLogonTicket` are not called:
 Dock never handles the ticket itself.
+
+## Pufflet fork — install spike (January build only)
+
+The fork starts at upstream `72558e416a390f3669457930f09a389e54f49556`.
+The official archive/hash above was freshly checked on 2026-10-16. RTTI finds
+IClientAppManagerMap at the same RVA `0x12c0278`. Added zero-based slots:
+
+| Slot | Method | January RVA | IPC function ID | Fencepost |
+|---|---|---|---|---|
+| 0 | InstallApp | `0x812430` | `0xdd9af165` | `0xdfbe9185` |
+| 4 | GetAppInstallState | `0x73bae0` | `0xeaf26184` | `0xed0f1d88` |
+| 20 | GetUpdateInfo | `0x777870` | `0x27b7a573` | `0x29e98bcd` |
+| 76 | GetLibraryFolderPath | `0x75e300` | `0xf27c5d4c` | `0xf4d07931` |
+| 77 | AddLibraryFolder | `0x706df0` | `0x16a14c1c` | `0x18f62504` |
+
+Each wrapper references its own method name and `IClientAppManager` through
+RIP-relative LEAs. `tools/check-client-layout.py` checks the slot, RVA, name
+and function ID (and an UninstallApp negative control). The September adapter
+has zero install addresses and refuses these calls. Launch support is unchanged.
+
+Disassembly, through the wrapper's return:
+
+- InstallApp: rcx this; edx AppID; r8d library index; r9b unscheduled. IPC sends
+  4/4/1-byte arguments, returns a 4-byte EAppUpdateError (0 accepted). Dock
+  passes false to request an immediate download. A zero response alone is
+  insufficient: the wrapper also returns zero on IPC read failure.
+- GetAppInstallState: rcx this, edx AppID; returns 4-byte state flags.
+- GetUpdateInfo: rcx this, edx AppID, r8 pointer. The wrapper reads a bool and
+  **exactly 0xf4 (244) bytes** into that pointer (`0x7779c7`); there is no size
+  argument. Dock allocates exactly 244 bytes. The older OpenSteamworks record
+  is **not** this layout: runtime decoding with its offsets 8/16 produced
+  impossible counters and failed closed (65). Independent inspection of the
+  server dispatch (`0x77de1a`), CUserAppManager slot 20 (`0x4b04a0`), and
+  CAppUpdateDepotsJob's secondary interface (offset 456, slot 3 `0x5383f0`)
+  establishes update flags at byte 4 and aggregate work bytes total/done at
+  **60/68**. The aggregator `0x5ac960` adds these at `0x5ad3ad` (0x3c) and
+  `0x5ad3a4` (0x44); the layout script checks those instructions. They are
+  aggregate work counters across update phases, not compressed CDN bytes.
+  Dock reads only these fields with memcpy and bounds checks, never raw data.
+- GetLibraryFolderPath: rcx this, edx index, r8 output, r9d capacity. It sends
+  index/capacity, reads a 4-byte count then a bounded string. Dock compares
+  the returned path to the explicitly requested absolute library directory.
+- AddLibraryFolder: rcx this, rdx NUL-terminated path. IPC serializes the
+  string and returns a signed 4-byte library index; negative means failure.
+
+The new ABI typedefs are independently written C, not copied declarations.
+Immediate-download semantics were initially reference-led; the official client
+independently confirms the wrapper names, sizes, argument registers and the
+corrected aggregate work-counter offsets. Runtime evidence belongs in HANDOFF.md.

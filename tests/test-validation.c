@@ -7,6 +7,40 @@
 #include <stdio.h>
 int main(void)
 {
+    uint32_t state = 0;
+    const char acf[] = "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"4\" \"Nested\" { \"StateFlags\" \"2\" } }";
+    assert(sh_install_manifest_ready(acf, strlen(acf), 17, &state) && state == 4);
+    assert(!sh_install_manifest_ready(acf, strlen(acf), 18, &state));
+    assert(!sh_install_manifest_ready(acf, strlen(acf) - 1, 17, &state));
+    assert(!sh_install_manifest_ready(NULL, 0, 17, &state));
+    assert(!sh_install_manifest_ready(acf, strlen(acf), 17, NULL));
+    const char *invalid_acfs[] = {
+        "\"AppState\" { \"appid\" \"17\" \"Nested\" { \"StateFlags\" \"4\" } }",
+        "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"6\" }",
+        "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"4\" \"StateFlags\" \"4\" }",
+        "\"AppState\" { \"appid\" \"17\" \"appid\" \"17\" \"StateFlags\" \"4\" }",
+        "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"4294967296\" }",
+        "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"+4\" }",
+        "\"AppState\" { \"appid\" \"17\" \"StateFlags\" \"4\" } garbage",
+        "\"AppState\" { \"appid\" \"17\" \"StateFlags\" { } }",
+        "\"Other\" { \"appid\" \"17\" \"StateFlags\" \"4\" }"
+    };
+    for (unsigned i = 0; i < sizeof(invalid_acfs) / sizeof(invalid_acfs[0]); ++i)
+        assert(!sh_install_manifest_ready(invalid_acfs[i], strlen(invalid_acfs[i]), 17, &state));
+    unsigned char info[244] = {0};
+    struct sh_install_progress install_progress;
+    uint64_t total = (uint64_t)UINT32_MAX + 1, downloaded = 2048;
+    /* January record: the old reference's offsets 8/16 are not counters. */
+    memset(info + 8, 0xff, 8);
+    memcpy(info + 60, &total, 8); memcpy(info + 68, &downloaded, 8);
+    assert(sh_install_decode_progress(info, sizeof(info), &install_progress));
+    assert(install_progress.total == total && install_progress.completed == 2048);
+    assert(!sh_install_decode_progress(info, 243, &install_progress));
+    assert(!sh_install_decode_progress(NULL, 244, &install_progress));
+    assert(!sh_install_decode_progress(info, 244, NULL));
+    downloaded = total + 1; memcpy(info + 68, &downloaded, 8);
+    assert(!sh_install_decode_progress(info, sizeof(info), &install_progress));
+    assert(sh_install_kib(2048) == 2 && sh_install_kib(UINT64_MAX) == INT32_MAX);
     uint32_t option = 99;
     assert(sh_parse_launch_option("0", &option) && option == 0);
     assert(sh_parse_launch_option("1", &option) && option == 1);

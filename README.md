@@ -1,11 +1,12 @@
-# Madeira Dock
+# Madeira Dock — Pufflet fork
 
 Madeira Dock is a small headless host for **Valve's own Steam client**. It lets
 [Madeira](https://github.com/willfaust/Madeira) (Windows games on iPhone and iPad, through Wine)
 start a game the signed-in user owns, with Steam's real sign-in, Steam's real licence check and the
 game's original DRM, without running Steam's desktop interface.
 
-It is one Windows program, `dockhost.exe`, about 2,000 lines of C.
+This fork adds an experimental opt-in install mode to the upstream launch host.
+Corresponding source: https://github.com/talhabalaj/madeira-dock/tree/pufflet.
 
 **Licence:** GPL-3.0-or-later with the Madeira Converter Exception, Copyright 2026 125hz
 (`LICENSE`, `COPYING`, `LICENSE-EXCEPTION.md`). Not affiliated with or endorsed by Valve.
@@ -86,9 +87,10 @@ nothing else.
   Valve's client's own offline logon (`docs/OFFLINE.md`), which the client allows only with the
   offline logon ticket Steam issued to it during an earlier online logon; it then answers the
   licence question from its own cache, as desktop Steam's Offline Mode does.
-- **No game installs.** Dock starts games that are already installed in the user's prefix with
-  their Steam app manifest. Dock itself downloads nothing; Valve's client may update a game's
-  content before starting it, as it does on a PC.
+- **Valve installs games.** The experimental `--install` mode asks the verified January
+  client to install into an explicit library, then observes progress and Valve's manifest.
+  Dock has no depot/chunk downloader and never writes a game manifest. Normal launches
+  still require installed games; Valve may update their content before starting them.
 - **No Valve files in this repository or in Madeira's app bundle.** Madeira downloads Valve's
   client packages from Valve's own update servers on the user's device and verifies them against
   pinned sizes and SHA-256 sums.
@@ -191,8 +193,8 @@ Wine's service manager reachable, prints one line and exits.
 
 ## Running it
 
-Dock is started by Madeira, not by hand. Everything is passed in the environment, and every stage
-is opt-in: with no variables set, `dockhost.exe` does nothing and exits with 2.
+Launches are normally started by Madeira/Pufflet with environment settings; the
+experimental install mode also takes CLI arguments. Every stage is opt-in: with no variables set, `dockhost.exe` does nothing and exits with 2.
 
 | Variable | Meaning |
 |---|---|
@@ -225,6 +227,32 @@ bounded detail explicitly identifies the requested launch entry as missing repor
 `launch-option-missing` and stops instead of waiting for configuration. The detail is never
 logged; other configuration waits and the sign-in and licence checks are unchanged.
 
+### Experimental install mode (Pufflet fork)
+
+`dockhost.exe --install <appid>` uses the same probe/session/login switches and
+one-use `MADEIRA_DOCK_AUTH_FILE` as a launch. The transfer must name the CLI
+App ID. Also set `MADEIRA_DOCK_INSTALL_LIBRARY` to an existing absolute local
+Windows library root (for example `C:\PuffletLibrary`, containing `steamapps`).
+Do not set the launch switch. Offline mode and cached-login mode are refused;
+`MADEIRA_DOCK_INSTALL=0` disables installs before any client load/sign-in.
+
+Only the exact January adapter supports installation. After online sign-in and
+the existing licence-list check, Dock verifies the new method addresses,
+registers/round-trips the library path and calls `InstallApp(appid, index, false)`.
+Valve handles all content fetching, manifests, decryption and disk writes.
+Dock pumps callbacks and polls `GetAppInstallState` and `GetUpdateInfo` once a
+second. Numeric `install-state`, `install-update-state`, `install-work-done-kib`
+and `install-work-total-kib` change reports describe aggregate work progress across phases (KiB truncated and
+saturated at INT32_MAX). Success requires state exactly 4 both from Valve's
+API and the matching, complete `appmanifest_<appid>.acf` in the selected library.
+No progress/state change for two minutes, a six-hour total bound, loss of the
+online session, or malformed progress ends the run with a numbered error.
+
+This is an undocumented ABI spike: keep one online account session and Wine
+running throughout the download. There is no pause/resume UI or cancellation
+protocol yet. Use an isolated test prefix/library until runtime evidence in
+`docs/HANDOFF.md` supports broader use. See `docs/CLIENT_LAYOUTS.md` for the ABI.
+
 ### Result codes
 
 | Code | Meaning |
@@ -250,6 +278,12 @@ logged; other configuration waits and the sign-in and licence checks are unchang
 | 50 | Offline: Valve's client cannot log this account on offline (no valid offline logon ticket), or this client build has no verified offline logon. |
 | 51 | Offline: Valve's client refused the offline logon. |
 | 52 | Offline: signed in offline, but the client's cached licences did not list the game within 60 seconds. |
+| 60 | Invalid install CLI or conflicting App ID. |
+| 61 | Missing/invalid library or Valve's returned library path did not match. |
+| 62 | Valve refused InstallApp; `install-request-result` is its numeric error. |
+| 63 | Install stalled for two minutes or exceeded six hours. |
+| 64 | Online session lost during install. |
+| 65 | Invalid GetUpdateInfo progress. |
 
 The report (`[steam-host] <round> <stage>=<number>` lines) is documented field by field in
 Madeira's `docs/MADEIRA_DOCK.md`.
@@ -280,6 +314,7 @@ logs, Valve binaries, games or build output.
 |---|---|
 | `src/main.c` | Entry point: gates, client identification and loading, shutdown, `--start-services`. |
 | `src/session.c` | Sign-in, the wait for online state, the offline logon, the licence check. |
+| `src/install.c` | Experimental Valve install request, progress and manifest observation. |
 | `src/launch.c` | Install-folder check, CEG request, discovery values, `LaunchApp`, the game-running loop. |
 | `src/auth.c` | The one-use sign-in transfer: parse, consume, clear. |
 | `src/client_layout.c` | The supported client builds and their method addresses. |

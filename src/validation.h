@@ -80,4 +80,9 @@ enum sh_install_scm sh_install_scm_outcome(bool enabled, uint32_t first_error,
                                            bool spawned, bool reachable);
 /* "started", "already", "off"; "failed" for any other value. */
 const char *sh_install_scm_word(int32_t outcome);
+/* Pufflet: bounded Valve-written ACF and the January GetUpdateInfo record. */
+bool sh_install_manifest_ready(const char *text, size_t size, uint32_t appid, uint32_t *state);
+struct sh_install_progress { uint32_t state; uint64_t total, completed; };
+bool sh_install_decode_progress(const void *data, size_t size, struct sh_install_progress *out);
+int32_t sh_install_kib(uint64_t bytes);
 #endif

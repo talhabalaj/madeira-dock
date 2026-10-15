@@ -24,6 +24,13 @@ int main(void)
     assert(!dock_method_is(base, &object, 8, sep->engine_user));
     assert(!dock_method_is(base, &object, 7, jan->engine_user));
     assert(jan->ceg_request == 0x82a8c0 && sep->ceg_request == 0x84e8b0);
+    assert(jan->install_app == 0x812430 && jan->update_info == 0x777870);
+    assert(jan->install_state == 0x73bae0 && jan->library_path == 0x75e300 && jan->add_library == 0x706df0);
+    assert(!sep->install_app && !sep->update_info && !sep->add_library);
+    vtable[0] = (void *)(base + jan->install_app);
+    assert(dock_method_is(base, &object, 0, jan->install_app));
+    assert(!dock_method_is(base, &object, 0, sep->install_app));
+    assert(!dock_method_is(base, &object, 1, jan->install_app));
     /* Offline logon: slots 5, 214 and 215, pinned per build. */
     assert(jan->logon_state == 0x7612c0 && jan->can_offline == 0x720330 && jan->logon_offline == 0x81dad0);
     assert(sep->logon_state == 0x77e460 && sep->can_offline == 0x73cbb0 && sep->logon_offline == 0x8415d0);

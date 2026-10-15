@@ -7,5 +7,6 @@
 #include "probe.h"
 #include "client_layout.h"
 int sh_session(HMODULE module, void *engine, const struct sh_api *api,
-               const struct sh_observer *observer, const struct dock_client_layout *layout);
+               const struct sh_observer *observer, const struct dock_client_layout *layout,
+               bool install);
 #endif

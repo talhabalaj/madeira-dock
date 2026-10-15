@@ -1,5 +1,55 @@
 # Madeira Dock — implementation handoff, ml2000 (2026-09-25)
 
+## Pufflet fork — Valve install spike (2026-10-16)
+
+Fork: https://github.com/talhabalaj/madeira-dock, branch `pufflet`, starting at
+upstream `72558e416a390f3669457930f09a389e54f49556`. `--install <appid>`
+uses the existing one-use token, online sign-in and licence-list check, then
+verified January IClientAppManager calls. No depot downloader or manifest
+writer was added. `MADEIRA_DOCK_INSTALL=0` is the kill switch. API, arguments,
+progress units and errors 60–65 are in README.md and CLIENT_LAYOUTS.md.
+
+Native Mac/Wine proof: a newly created private test prefix and empty library,
+o copied account cache, no real Steam prefix/library accessed. Official Valve
+packages were freshly fetched and verified against Pufflet's pins. The
+installed Wine 11 runtime revision 2 was executed read-only; revision 1 could
+not start its wineserver (missing LC_RPATH for libinotify). No runtime files,
+signatures or releases were changed for the test.
+
+App ID 480 (free sample): real token accepted, online and listed, all new
+method addresses checked, library index 1 path round-tripped, InstallApp
+returned 0. The first attempt correctly failed closed with 65 because the
+older reference's progress layout is obsolete; January offsets were then
+independently traced in Valve's implementation and regression-checked.
+The corrected run downloaded through Valve's authenticated CDN connections;
+37 progress samples included 0, 36,864, 50,176, 76,856 and 83,134 KiB toward
+83,838 KiB aggregate work. The client reset its counters at completion, so
+completion comes from the API state and ACF, never a calculated percentage.
+
+Valve's resulting appmanifest_480.acf: StateFlags 4, UpdateResult 0, buildid
+3538192, BytesDownloaded = BytesToDownload = 85,751,344; BytesStaged =
+BytesToStage = 85,850,313. The sample's SizeOnDisk is 1,906,055 bytes; most
+traffic is its shared redistributable dependency (Valve selected/scheduled it).
+Install reported install-complete=1 and probe-result=0 with normal shutdown.
+No ACF was seeded or edited by the harness.
+
+A separate Dock launch in that same prefix, with a fresh one-use handoff and
+its actual expected install folder, passed the directory check. Valve returned
+callback 1270027, 524 bytes, matching GameID and launch-client-error=0;
+launch-game-running=1. After closing only the test game, launch-game-ended=1,
+launch-discovery-restored=1, launch-host-result=0 and probe-result=0. Both
+handoffs were consumed/removed. This proves installation and Dock launch;
+it does not prove rendering, extended gameplay or Pufflet's future install UI.
+
+Validation: all four ASan/UBSan suites, x64 and i386 cross-builds with
+LLVM/MinGW 20260421 and -Werror, exact-DLL layout/name/IPC checks and progress
+instruction checks, working-tree privacy scan. The all-history privacy scan
+reports 14 inherited upstream path/email findings; no history was rewritten.
+No test logs, credentials, account IDs, personal paths, Valve files or game
+files belong in commits. The sibling Madeira checkout/integration guide is
+not present in Pufflet; Swift integration guidance is maintained in Pufflet's
+`docs/DOCK_INSTALL_SPIKE.md` instead.
+
 ## Original launch entry keys (2026-10-05)
 
 LaunchApp uses the validated `MADEIRA_STEAM_HOST_LAUNCH_OPTION` for its initial

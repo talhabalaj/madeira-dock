@@ -17,7 +17,7 @@ source = (Path(__file__).resolve().parents[1] / 'src/client_layout.c').read_text
 block = re.search(r'"' + fingerprint + r'",\s*(\d+),([^}]+)', source)
 assert block, 'Unknown SHA-256; never infer a layout from similar metadata'
 rvas = [int(x, 16) for x in re.findall(r'0x[0-9a-f]+', block[2])]
-assert len(rvas) == 18
+assert len(rvas) in (18, 23)
 pe = struct.unpack_from('<I', raw, 0x3c)[0]
 assert raw[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', raw, pe+4)[0] == 0x8664
 sections = struct.unpack_from('<H', raw, pe+6)[0]
@@ -82,3 +82,18 @@ for rva, name, function_id in ((rvas[15], 'GetLogonState', 0xb3679023),
                                (rvas[17], 'LogOnOffline', 0x706f013f)):
     assert names_method(rva, name, function_id), f'{name} is not at its pinned slot'
 print('PASS: IClientUserMap slots 5/214/215 name GetLogonState, CanLogonOffline, LogOnOffline')
+
+if len(rvas) == 23:
+    table = vtable('IClientAppManagerMap')
+    for slot, rva, name, function_id in zip(
+            (0, 4, 20, 76, 77), rvas[18:23],
+            ('InstallApp', 'GetAppInstallState', 'GetUpdateInfo', 'GetLibraryFolderPath', 'AddLibraryFolder'),
+            (0xdd9af165, 0xeaf26184, 0x27b7a573, 0xf27c5d4c, 0x16a14c1c)):
+        actual = struct.unpack_from('<Q', image, table + 8 * slot)[0] - base
+        assert actual == rva and names_method(rva, name, function_id), (slot, name)
+    assert not names_method(rvas[18], 'UninstallApp', 0xdd9af165)
+    # The January record differs from the older reference: aggregate work-byte
+    # counters are updated at 0x44/0x3c, not 0x10/0x08. No call to this helper.
+    assert image[0x5ad3a4:0x5ad3a8] == bytes.fromhex('48 01 42 44')
+    assert image[0x5ad3ad:0x5ad3b1] == bytes.fromhex('48 01 42 3c')
+    print('PASS: January install/progress/library slots, names and IPC IDs; negative control')
