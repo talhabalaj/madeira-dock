@@ -86,6 +86,12 @@ struct sh_install_progress { uint32_t state; uint64_t total, completed; };
 bool sh_install_decode_progress(const void *data, size_t size, struct sh_install_progress *out);
 int32_t sh_install_kib(uint64_t bytes);
 bool sh_downloads_paused_while_playing(bool playing, bool user_paused, bool enabled, uint32_t state);
+/* Valve owns queueing, verification and errors; Dock only measures how long an
+ * unpaused install's observed state and progress have stayed the same. A NULL
+ * progress keeps the last record. Pausing or any change restarts the clock. */
+struct sh_install_activity { uint32_t state, update_state; uint64_t total, completed, changed; bool started; };
+uint64_t sh_install_unchanged_ms(struct sh_install_activity *activity, uint64_t now, uint32_t state,
+                                 const struct sh_install_progress *progress, bool paused);
 /* Persistent control protocol. No paths or account strings are accepted. */
 enum sh_command_kind { SH_CMD_INSTALL = 1, SH_CMD_PAUSE, SH_CMD_RESUME,
     SH_CMD_CANCEL, SH_CMD_LAUNCH, SH_CMD_STATUS, SH_CMD_SHUTDOWN };

@@ -354,3 +354,19 @@ bool sh_downloads_paused_while_playing(bool playing, bool user_paused, bool enab
 {
     return playing && !user_paused && (!enabled || (state & 512));
 }
+
+uint64_t sh_install_unchanged_ms(struct sh_install_activity *activity, uint64_t now, uint32_t state,
+                                 const struct sh_install_progress *progress, bool paused)
+{
+    struct sh_install_activity next = *activity;
+    next.state = state;
+    if (progress) { next.update_state = progress->state; next.total = progress->total; next.completed = progress->completed; }
+    if (!activity->started || paused || now < activity->changed || next.state != activity->state ||
+        next.update_state != activity->update_state || next.total != activity->total ||
+        next.completed != activity->completed) {
+        next.changed = now; next.started = true;
+        *activity = next;
+        return 0;
+    }
+    return now - activity->changed;
+}

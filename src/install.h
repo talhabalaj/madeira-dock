@@ -4,6 +4,7 @@
 #ifndef MADEIRA_DOCK_INSTALL_H
 #define MADEIRA_DOCK_INSTALL_H
 #include "session.h"
+#include "validation.h"
 int sh_install(HMODULE module, void *engine, const struct sh_api *api,
                const struct sh_observer *o, int32_t pipe, int32_t user,
                uint32_t appid, const struct dock_client_layout *layout);
@@ -14,6 +15,7 @@ struct sh_install_job {
     char manifest[4096];
     bool verifying, observed_update;
     uint64_t began;
+    struct sh_install_activity activity;
 };
 int sh_install_begin(HMODULE module, void *engine, const struct sh_observer *o,
                      int32_t pipe, int32_t user, uint32_t app,

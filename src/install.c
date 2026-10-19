@@ -198,15 +198,22 @@ int sh_install_poll(struct sh_install_job *job, const struct sh_observer *o,
     o->event("install-paused", (state & 512) != 0);
     typedef bool (__thiscall *enabled_fn)(void *);
     bool enabled = ((enabled_fn)v[40])(job->manager);
-    o->event("install-paused-playing", sh_downloads_paused_while_playing(playing, user_paused, enabled, state));
+    bool paused_playing = sh_downloads_paused_while_playing(playing, user_paused, enabled, state);
+    o->event("install-paused-playing", paused_playing);
     unsigned char info[244] = {0};
-    if (((update_info_fn)v[20])(job->manager, job->app, info)) {
-        struct sh_install_progress progress = {0};
+    struct sh_install_progress progress = {0};
+    bool has_progress = ((update_info_fn)v[20])(job->manager, job->app, info);
+    if (has_progress) {
         if (!sh_install_decode_progress(info, sizeof(info), &progress)) return 65;
         o->event("install-update-state", (int32_t)progress.state);
         o->event("install-work-done-kib", sh_install_kib(progress.completed));
         o->event("install-work-total-kib", sh_install_kib(progress.total));
     }
+    /* A status, not a result: Valve may be queueing, verifying or retrying, and
+     * its error fields are undocumented. The user decides to wait or cancel. */
+    bool paused = user_paused || paused_playing || (state & 512) || !enabled;
+    o->event("install-no-progress", sh_install_unchanged_ms(&job->activity, o->now_ms(), state,
+                                                            has_progress ? &progress : NULL, paused) >= 300000);
     uint32_t flags = 0;
     if (state == 4 && (!job->verifying || job->observed_update) && manifest_ready(job->manifest, job->app, &flags)) {
         o->event("install-manifest-state", (int32_t)flags);

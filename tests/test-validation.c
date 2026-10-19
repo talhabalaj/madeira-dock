@@ -207,6 +207,30 @@ int main(void)
     assert(!strcmp(sh_install_scm_word(SH_INSTALL_SCM_OFF), "off"));
     assert(!strcmp(sh_install_scm_word(SH_INSTALL_SCM_FAILED), "failed"));
     assert(!strcmp(sh_install_scm_word(7), "failed"));
+    {
+        /* No progress is a status, never a terminal result: unchanged records keep counting. */
+        struct sh_install_activity activity = {0};
+        struct sh_install_progress progress = {1030, 1380000000ull, 18000000ull};
+        assert(sh_install_unchanged_ms(&activity, 1000, 1030, &progress, false) == 0);
+        assert(sh_install_unchanged_ms(&activity, 301000, 1030, &progress, false) == 300000);
+        assert(sh_install_unchanged_ms(&activity, 604801000ull, 1030, NULL, false) == 604800000ull);
+        progress.completed += 1;
+        assert(sh_install_unchanged_ms(&activity, 604802000ull, 1030, &progress, false) == 0);
+        progress.state = 2;
+        assert(sh_install_unchanged_ms(&activity, 604803000ull, 1030, &progress, false) == 0);
+        assert(sh_install_unchanged_ms(&activity, 604804000ull, 1026, &progress, false) == 0);
+        progress.total += 1;
+        assert(sh_install_unchanged_ms(&activity, 604805000ull, 1026, &progress, false) == 0);
+        /* User, Valve and play pauses never accumulate; resuming starts a fresh interval. */
+        assert(sh_install_unchanged_ms(&activity, 700000000ull, 1026, &progress, true) == 0);
+        assert(sh_install_unchanged_ms(&activity, 800000000ull, 1026, &progress, true) == 0);
+        assert(sh_install_unchanged_ms(&activity, 800001000ull, 1026, &progress, false) == 1000);
+        assert(sh_install_unchanged_ms(&activity, 5, 1026, &progress, false) == 0);
+        /* Queued work with no update record still reports an unknown wait. */
+        struct sh_install_activity queued = {0};
+        assert(sh_install_unchanged_ms(&queued, 0, 0, NULL, false) == 0);
+        assert(sh_install_unchanged_ms(&queued, 300000, 0, NULL, false) == 300000);
+    }
     puts("steam-host: launch-option, entitlement-list, launch-result, content-wait, config-wait, session-wait, CEG, service-manager "
          "and install-service-manager validation cases passed");
 }

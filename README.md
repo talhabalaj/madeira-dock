@@ -283,7 +283,10 @@ A stdin reader thread only parses into a bounded mailbox. One main thread
 makes all client calls, dispatches callbacks before freeing them, and polls
 launch/CEG/retry/running and all installs without nested wait loops. Valve owns
 installation order, shared dependencies and download-while-playing policy.
-Queued/paused jobs have no two-minute stall timer. `pause` selects Valve queue
+Queued/paused jobs have no two-minute stall timer. `install-no-progress=1` is
+a status, not a result: an unpaused job's install state, update state and work
+counts have been unchanged for five minutes. Pausing or any change clears it,
+and the job stays tracked until it completes or is cancelled. `pause` selects Valve queue
 placement 6; `resume` selects 5. `cancel` pauses and removes the host's tracking
 record, preserving partial content for a later install request; it never calls
 UninstallApp. `install-paused-playing=1` means the client reports paused state

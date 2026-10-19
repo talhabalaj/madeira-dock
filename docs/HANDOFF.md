@@ -1,5 +1,16 @@
 # Madeira Dock — implementation handoff, ml2000 (2026-09-25)
 
+## Pufflet fork — no-progress status (2026-10-19)
+
+`--serve` install polls now emit `install-no-progress`. It becomes 1 once an
+unpaused job's install state, update state and work counts have stayed the
+same for five minutes. It is a status, never a result: the job stays tracked,
+and Pufflet tells the user to keep waiting or Stop and Retry. User, Valve and
+while-playing pauses reset the clock. Validation: sanitizer suites, x64/i386
+-Werror builds with llvm-mingw 20261006 and the tree privacy check pass. Two
+mutants of the clock (it never resets, or pauses are ignored) fail the suite.
+Not yet observed on a live stalled install.
+
 ## Pufflet fork — persistent session (2026-10-16)
 
 The fork adds `--serve`, bounded numeric stdin commands/stdout events, a single
