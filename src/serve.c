@@ -13,6 +13,16 @@
 #ifdef _WIN64
 #define COMMAND_CAP 64
 #define JOB_CAP 64
+/* ml2017: Valve's client drops its CM connection for a few seconds now and
+ * then (CM rebalancing, a network change, waking from sleep) and reconnects on
+ * its own; its logon takes 2-8 s. Ending the session after 1 s offline turned
+ * every such blip into "session disconnected" with nothing for the user to
+ * fix. Commands now wait for the reconnect (below the launcher's 30 s
+ * acknowledgement timeout) and the session ends only after a minute offline,
+ * or at once when Valve says another logon took the account. */
+#define OFFLINE_SESSION_MS 60000
+#define OFFLINE_COMMAND_HOLD_MS 15000
+#define SH_LOGON_TAKEN 70
 static struct {
     CRITICAL_SECTION lock;
     struct sh_command commands[COMMAND_CAP];
@@ -124,6 +134,7 @@ int sh_serve(HMODULE module, void *engine, void *client_user,
     uint32_t launch_request = 0, launch_app = 0, last_request = 0;
     uint64_t idle_since = o->now_ms(), last_poll = 0, offline_since = 0;
     int result = 0;
+    bool taken = false;
     request_tag = app_tag = 0; emit("session-ready", 1);
     for (;;) {
         uint64_t now = o->now_ms();
@@ -133,15 +144,30 @@ int sh_serve(HMODULE module, void *engine, void *client_user,
             if (!api->get_callback(pipe, &cb)) break;
             bool valid = cb.id > 0 && cb.size >= 0 && (!cb.size || cb.data);
             if (valid && launch) sh_launch_callback(launch, &cb);
+            /* SteamServerConnectFailure_t (102) / SteamServersDisconnected_t (103):
+             * the EResult says why the client went offline. Numbers only. */
+            if (valid && (cb.id == 102 || cb.id == 103) && cb.size >= 4) {
+                int32_t error;
+                memcpy(&error, cb.data, 4);
+                request_tag = app_tag = 0; emit("session-connection-result", error);
+                request_tag = launch_request; app_tag = launch_app;
+                if (sh_logon_taken(error)) taken = true;
+            }
             api->free_callback(pipe);
             if (!valid) { result = SH_CALLBACK_INVALID; goto done; }
         }
         bool online = api->logged_on(user, pipe) &&
             ((query_fn)(*(void ***)client_user)[4])(client_user) &&
             ((query_fn)(*(void ***)client_user)[6])(client_user);
-        if (online) offline_since = 0;
-        else if (!offline_since) offline_since = now;
-        else if (now - offline_since >= 1000) { result = 64; goto done; }
+        if (online) {
+            if (offline_since) {
+                request_tag = app_tag = 0; emit("session-online-blip", (int32_t)(now - offline_since));
+                request_tag = launch_request; app_tag = launch_app;
+            }
+            offline_since = 0; taken = false;
+        } else if (!offline_since) offline_since = now;
+        if (!online && taken) { result = SH_LOGON_TAKEN; goto done; }
+        if (sh_offline_expired(now, offline_since, OFFLINE_SESSION_MS)) { result = 64; goto done; }
         if (launch) {
             int step = sh_launch_poll(launch);
             if (step != -1) {
@@ -170,7 +196,12 @@ int sh_serve(HMODULE module, void *engine, void *client_user,
         }
         struct sh_command cmd = {0}; bool eof, invalid;
         EnterCriticalSection(&input.lock);
-        if (input.count) { cmd = input.commands[input.head]; input.head = (input.head + 1) % COMMAND_CAP; --input.count; }
+        /* While briefly offline, leave work commands queued for the reconnect;
+         * shutdown and status never wait. */
+        enum sh_command_kind next = input.count ? input.commands[input.head].kind : SH_CMD_STATUS;
+        bool hold = !online && next != SH_CMD_SHUTDOWN && next != SH_CMD_STATUS &&
+            !sh_offline_expired(now, offline_since, OFFLINE_COMMAND_HOLD_MS);
+        if (input.count && !hold) { cmd = input.commands[input.head]; input.head = (input.head + 1) % COMMAND_CAP; --input.count; }
         eof = input.eof; invalid = input.invalid; input.invalid = false;
         LeaveCriticalSection(&input.lock);
         request_tag = cmd.request; app_tag = cmd.app;

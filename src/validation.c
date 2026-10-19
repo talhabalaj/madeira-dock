@@ -350,6 +350,16 @@ bool sh_session_idle(uint64_t now, uint64_t idle_since, uint64_t bound,
     return !downloading && !launching && now >= idle_since && now - idle_since >= bound;
 }
 
+bool sh_offline_expired(uint64_t now, uint64_t offline_since, uint64_t bound)
+{
+    return offline_since && now >= offline_since && now - offline_since >= bound;
+}
+
+bool sh_logon_taken(int32_t eresult)
+{
+    return eresult == 6 || eresult == 34;
+}
+
 bool sh_downloads_paused_while_playing(bool playing, bool user_paused, bool enabled, uint32_t state)
 {
     return playing && !user_paused && (!enabled || (state & 512));

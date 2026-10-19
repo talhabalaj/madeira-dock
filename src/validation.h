@@ -99,4 +99,9 @@ struct sh_command { uint32_t request, app, option; enum sh_command_kind kind; };
 bool sh_parse_command(const char *line, struct sh_command *out);
 bool sh_session_idle(uint64_t now, uint64_t idle_since, uint64_t bound,
                      bool downloading, bool launching);
+/* ml2017: offline_since 0 means online. True once offline for `bound` ms. */
+bool sh_offline_expired(uint64_t now, uint64_t offline_since, uint64_t bound);
+/* ml2017: EResults after which Valve's client will not reconnect by itself:
+ * LoggedInElsewhere (6) and LogonSessionReplaced (34). */
+bool sh_logon_taken(int32_t eresult);
 #endif

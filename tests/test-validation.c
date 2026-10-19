@@ -25,6 +25,12 @@ int main(void)
     for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
         assert(!sh_parse_command(invalid[i], &command));
     assert(sh_session_idle(300000, 0, 300000, false, false));
+    assert(!sh_offline_expired(90000, 0, 1000));
+    assert(!sh_offline_expired(59999, 1, 60000));
+    assert(sh_offline_expired(60001, 1, 60000));
+    assert(!sh_offline_expired(5, 10, 1));
+    assert(sh_logon_taken(6) && sh_logon_taken(34));
+    assert(!sh_logon_taken(1) && !sh_logon_taken(3) && !sh_logon_taken(0));
     assert(!sh_session_idle(300000, 0, 300000, true, false));
     assert(!sh_session_idle(300000, 0, 300000, false, true));
     assert(!sh_session_idle(299999, 0, 300000, false, false));
